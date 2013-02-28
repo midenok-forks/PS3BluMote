@@ -27,6 +27,10 @@ using System.Timers;
 using HidLibrary;
 using WindowsAPI;
 
+using InTheHand.Net;
+using InTheHand.Net.Bluetooth;
+using InTheHand.Net.Sockets;
+
 namespace PS3BluMote
 {
     class PS3Remote
@@ -36,6 +40,8 @@ namespace PS3BluMote
         public event EventHandler<ButtonData> ButtonReleased;
         public event EventHandler<EventArgs> Connected;
         public event EventHandler<EventArgs> Disconnected;
+        public event EventHandler<EventArgs> Hibernated;
+        public event EventHandler<EventArgs> Awake;
 
         private HidDevice hidRemote = null;
         private Timer timerFindRemote = null;
@@ -45,6 +51,12 @@ namespace PS3BluMote
         private Button lastButton = Button.Angle;
         private bool isButtonDown = false;
         private bool _hibernationEnabled;
+        private int _hibernationInterval=180000;
+        private string _btAddress;
+        private bool _hibernated;
+
+        private string insertSound;
+        private string removeSound;
 
         private byte _batteryLife = 100;
 
@@ -110,19 +122,25 @@ namespace PS3BluMote
         };
         #endregion
 
-        public PS3Remote(int vendor, int product, bool hibernation)
+        public PS3Remote(int vendor, int product)
         {
             vendorId = vendor;
             productId = product;
-            _hibernationEnabled = hibernation;
+            _hibernationEnabled = false;
+            _btAddress = "";
+            _hibernated = false;
+            
 
             timerHibernation = new Timer();
-            timerHibernation.Interval = 60000;
+            timerHibernation.Interval = _hibernationInterval;
             timerHibernation.Elapsed += new ElapsedEventHandler(timerHibernation_Elapsed);
 
             timerFindRemote = new Timer();
             timerFindRemote.Interval = 1500;
             timerFindRemote.Elapsed += new ElapsedEventHandler(timerFindRemote_Elapsed);
+
+            insertSound = "";
+            removeSound = "";
         }
 
         public void connect()
@@ -143,7 +161,30 @@ namespace PS3BluMote
         public bool hibernationEnabled
         {
             get { return _hibernationEnabled; }
-            set { _hibernationEnabled = value; }
+            set
+            {
+                _hibernationEnabled = value;
+                timerHibernation.Enabled = _hibernationEnabled;
+            }
+        }
+        public int hibernationInterval
+        {
+            get { return _hibernationInterval; }
+            set { 
+                _hibernationInterval = value;
+                timerHibernation.Interval = _hibernationInterval;
+                if (timerHibernation.Enabled)
+                {
+                    timerHibernation.Stop();
+                    timerHibernation.Start();
+                }
+            }
+        }
+
+        public string btAddress
+        {
+            get { return _btAddress; }
+            set { _btAddress = value; }
         }
 
         private void readButtonData(HidDeviceData InData)
@@ -152,6 +193,12 @@ namespace PS3BluMote
 
             if ((InData.Status == HidDeviceData.ReadStatus.Success) && (InData.Data[0] == 1))
             {
+                if (_hibernated && Awake != null)
+                {
+                    Awake(this, new EventArgs());
+                    _hibernated = false;
+                }
+                
                 if (DebugLog.isLogging) DebugLog.write("Read button data: " + String.Join(",", InData.Data));
                 //Debug.Print("Read button data: " + String.Join(",", InData.Data));
 
@@ -209,6 +256,7 @@ namespace PS3BluMote
             hidRemote = null;
 
             timerFindRemote.Enabled = true; //Try to reconnect.
+            if (_hibernationEnabled) timerHibernation.Enabled = false;
         }
 
         private void timerFindRemote_Elapsed(object sender, ElapsedEventArgs e)
@@ -227,11 +275,16 @@ namespace PS3BluMote
 
                     hidRemote.OpenDevice();
 
+
                     if (Connected != null)
                     {
                         Connected(this, new EventArgs());
                     }
-
+                    if (_hibernated && Hibernated != null)
+                    {
+                        Hibernated(this, new EventArgs());
+                    }
+                    if (!_hibernated && hibernationEnabled) timerHibernation.Enabled = true;
                     hidRemote.Read(readButtonData);
 
                     timerFindRemote.Enabled = false;
@@ -245,25 +298,64 @@ namespace PS3BluMote
 
         private void timerHibernation_Elapsed(object sender, ElapsedEventArgs e)
         {
-            /*if (DebugLog.isLogging) DebugLog.write("Attempting to hibernate remote");
-
-            try
-            {
-                HardwareAPI.DisableDevice(n => n.ToUpperInvariant().Contains
-                    ("_VID&0002054C_PID&0306"), true);
-
-                System.Threading.Thread.Sleep(1500);
-
-                HardwareAPI.DisableDevice(n => n.ToUpperInvariant().Contains
-                    ("_VID&0002054C_PID&0306"), false);
-            }
-            catch (Exception ex)
-            {
-                if (DebugLog.isLogging) DebugLog.write("Unable to hibernate remote:" + ex.Message);
-            }
-
-            timerFindRemote.Enabled = true;*/
             timerHibernation.Enabled = false;
+            if (DebugLog.isLogging) DebugLog.write("Attempting to hibernate remote");
+
+            if (_btAddress.Length == 12)
+            {
+                try
+                {
+                    try
+                    {
+                        if (DebugLog.isLogging) DebugLog.write("Saving device connect/disconnect sounds:");
+                        insertSound = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", "");
+                        removeSound = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", "");
+                    }
+                    catch
+                    {
+                        if (DebugLog.isLogging) DebugLog.write("Unable to save device connect/disconnect sounds.");
+                    }
+
+                    if (DebugLog.isLogging) DebugLog.write("Disabling device connect/disconnect sounds:");
+                    Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", "");
+                    Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", "");
+
+                    if (DebugLog.isLogging) DebugLog.write("Hibernating the remote with address " + _btAddress + ":");
+                    BluetoothDeviceInfo device = new BluetoothDeviceInfo(BluetoothAddress.Parse(_btAddress));
+
+                    if (DebugLog.isLogging) DebugLog.write("Disconnecting HID Service from the Remote...");
+                    device.SetServiceState(BluetoothService.HumanInterfaceDevice, false);
+
+                    if (DebugLog.isLogging) DebugLog.write("ReConnecting HID Service to the Remote...");
+                    device.SetServiceState(BluetoothService.HumanInterfaceDevice, true);
+
+                    _hibernated = true;
+
+                }
+                catch (Exception ex)
+                {
+                    if (DebugLog.isLogging) DebugLog.write("Unable to hibernate remote:" + ex.Message);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (DebugLog.isLogging) DebugLog.write("Restoring device connect/disconnect sounds:");
+                        if (insertSound.Length > 0) Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", insertSound);
+                        if (removeSound.Length > 0) Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", removeSound);
+                    }
+                    catch
+                    {
+                        if (DebugLog.isLogging) DebugLog.write("Unable to restore device connect/disconnect sounds.");
+                    }
+                    if (DebugLog.isLogging) DebugLog.write("Hibernating Done.");
+                }
+
+            }
+            else
+            {
+                if (DebugLog.isLogging) DebugLog.write("Wrong format for BT Address");
+            }
         }
 
         public class ButtonData : EventArgs

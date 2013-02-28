@@ -358,8 +358,7 @@ SMK Blu-Link VP3700:
     PID: 0x0306      VID: 0x0609
 
 Logitech Harmony (with PS3 Adapter):
-    PID: 0x0306      VID: 0x046d
-    </value>
+    PID: 0x0306      VID: 0x046d</value>
   </data>
   <metadata name="toolTipAdvanced.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>262, 17</value>

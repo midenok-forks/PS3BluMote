@@ -17,6 +17,8 @@ PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIG
 HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Hibernation Code provided and integrated by Miljbee (miljbee@gmail.com)
 */
 
 using System;
@@ -27,6 +29,9 @@ using System.Windows.Forms;
 using System.Xml;
 
 using WindowsAPI;
+using Microsoft.Win32;
+
+using BDRemoteSleep;
 
 namespace PS3BluMote
 {
@@ -40,6 +45,9 @@ namespace PS3BluMote
         private PS3Remote remote = null;
         private SendInputAPI.Keyboard keyboard = null;
         private System.Timers.Timer timerRepeat = null;
+
+        private string insertSound = "";
+        private string removeSound = "";
 
         public SettingsForm()
         {
@@ -73,15 +81,100 @@ namespace PS3BluMote
             timerRepeat.Interval = int.Parse(txtRepeatInterval.Text);
             timerRepeat.Elapsed += new System.Timers.ElapsedEventHandler(timerRepeat_Elapsed);
 
+            buttonDump.Visible = DebugLog.isLogging;
+
+            // Finding BT Address of the remote for Hibernation
+            if (txtBtAddr.Text.Length != 12 && txtBtAddr.Text.Length != 17)
+            {
+                try
+                {
+                    RegistryKey bthEnum = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\BTHENUM");
+                    string vid = txtVendorId.Text.Substring(2);
+                    string pid = txtProductId.Text.Substring(2);
+                    string filter = vid + "_PID&" + pid;
+                    SearchKey sk = new SearchKey(bthEnum, filter, "Bluetooth_UniqueID");
+                    if (sk.Result != null)
+                    {
+                        string addr = (string)sk.Result.GetValue("Bluetooth_UniqueID");
+                        if (addr.Length != 0 && addr.Contains("#") && addr.Contains("_") && (addr.IndexOf("_") - addr.IndexOf("#")) == 13)
+                        {
+                            addr = addr.Substring(addr.IndexOf("#") + 1, 12);
+                            txtBtAddr.Text = addr.Substring(0, 2) + ":" + addr.Substring(2, 2) + ":" + addr.Substring(4, 2) + ":" + addr.Substring(6, 2) + ":" + addr.Substring(8, 2) + ":" + addr.Substring(10, 2);
+                        }
+                    }
+                }
+                catch
+                {
+                    if (DebugLog.isLogging) DebugLog.write("Unexpected error while trying to retrieve BT Address from registry");
+                }
+            }
+            // Saving Device Insertion sounds
             try
             {
-                remote = new PS3Remote(int.Parse(txtVendorId.Text.Remove(0, 2), System.Globalization.NumberStyles.HexNumber), int.Parse(txtProductId.Text.Remove(0, 2), System.Globalization.NumberStyles.HexNumber), cbHibernation.Checked);
+                string s;
+                bool save=false;
+                s = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", "");
+                if (insertSound.Length == 0 || (insertSound != s && s.Length > 0))
+                {
+                    insertSound = s;
+                    save = true;
+                }
+                s = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", "");
+                if (removeSound.Length == 0 || (removeSound != s && s.Length > 0))
+                {
+                    removeSound = s;
+                    save = true;
+                }
+                if (save) saveSettings();
+            }
+            catch
+            {
+                if (DebugLog.isLogging) DebugLog.write("Unexpected error while trying to save Devices insertion/remove sounds.");
+            }
+
+            // Restoring Device Insertion sounds in case they have been left blank
+            try
+            {
+                string s;
+                s = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", "");
+                if (s.Length == 0 && insertSound.Length > 0) Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", insertSound);
+                s = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", "");
+                if (s.Length == 0 && removeSound.Length > 0) Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", removeSound);
+            }
+            catch 
+            {
+                if (DebugLog.isLogging) DebugLog.write("Unexpected error while trying to restore Devices insertion/remove sounds.");
+            }
+
+            try
+            {
+                int hibMs;
+                try
+                {
+                    hibMs = System.Convert.ToInt32(txtMinutes.Text) * 60 * 1000;
+                }
+                catch
+                {
+                    if (DebugLog.isLogging) DebugLog.write("Error while parsing Hibernation Interval, taking Default 3 Minutes");
+                    txtMinutes.Text = "3";
+                    hibMs = 180000;
+                }
+                remote = new PS3Remote(int.Parse(txtVendorId.Text.Remove(0, 2), System.Globalization.NumberStyles.HexNumber), int.Parse(txtProductId.Text.Remove(0, 2), System.Globalization.NumberStyles.HexNumber));
+
                 remote.BatteryLifeChanged += new EventHandler<EventArgs>(remote_BatteryLifeChanged);
                 remote.ButtonDown += new EventHandler<PS3Remote.ButtonData>(remote_ButtonDown);
                 remote.ButtonReleased += new EventHandler<PS3Remote.ButtonData>(remote_ButtonReleased);
+
                 remote.Connected += new EventHandler<EventArgs>(remote_Connected);
                 remote.Disconnected += new EventHandler<EventArgs>(remote_Disconnected);
+                remote.Hibernated += new EventHandler<EventArgs>(remote_Hibernated);
+                remote.Awake += new EventHandler<EventArgs>(remote_Connected);
+
                 remote.connect();
+
+                remote.hibernationEnabled = cbHibernation.Enabled && cbHibernation.Checked;
+                remote.hibernationInterval = hibMs;
+                remote.btAddress = txtBtAddr.Text.Replace(":", "").Replace("-", "").Replace(".", "").Replace(" ", "");
             }
             catch
             {
@@ -94,11 +187,18 @@ namespace PS3BluMote
         private void cbDebugMode_CheckedChanged(object sender, EventArgs e)
         {
             DebugLog.isLogging = cbDebugMode.Checked;
+            buttonDump.Visible = DebugLog.isLogging;
         }
 
         private void cbHibernation_CheckedChanged(object sender, EventArgs e)
         {
-            remote.hibernationEnabled = cbHibernation.Checked;
+            if (txtBtAddr.Text.Length==12 || txtBtAddr.Text.Length==17 && remote!=null) remote.hibernationEnabled = cbHibernation.Checked;
+            else if (cbHibernation.Checked && remote!=null)
+            {
+                MessageBox.Show("Fill in the BT Address field with a correct value before attempting to enable hibernation.", "PS3BluMote: Error!", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                cbHibernation.Checked = false;
+                remote.hibernationEnabled = false;
+            }
         }
 
         private void cbSms_CheckedChanged(object sender, EventArgs e)
@@ -130,10 +230,19 @@ namespace PS3BluMote
 
                     if (rssNode.Attributes["version"].InnerText == SETTINGS_VERSION)
                     {
-                        cbSms.Checked = (rssNode.SelectSingleNode("settings/smsinput").InnerText.ToLower() == "true") ? true : false;
-                        cbHibernation.Checked = (rssNode.SelectSingleNode("settings/hibernation").InnerText.ToLower() == "true") ? true : false;
+                        cbSms.Checked = rssNode.SelectSingleNode("settings/smsinput").InnerText.ToLower() == "true";
                         txtVendorId.Text = rssNode.SelectSingleNode("settings/vendorid").InnerText;
                         txtProductId.Text = rssNode.SelectSingleNode("settings/productid").InnerText;
+                        try
+                        {
+                            txtBtAddr.Text = rssNode.SelectSingleNode("settings/btaddress").InnerText;
+                            cbHibernation.Checked = rssNode.SelectSingleNode("settings/hibernation").InnerText.ToLower() == "true";
+                            cbDebugMode.Checked = rssNode.SelectSingleNode("settings/debug").InnerText.ToLower() == "true";
+                            txtMinutes.Text = rssNode.SelectSingleNode("settings/minutes").InnerText;
+                        }
+                        catch
+                        {
+                        }
 
                         try
                         {
@@ -142,11 +251,11 @@ namespace PS3BluMote
                         catch
                         { }
                         
-                        if (cbHibernation.Checked &&
+                        /*if (cbHibernation.Checked &&
                             !(new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)))
                         {
                             MessageBox.Show("Admin/UAC elevated rights are required to use the hibernation feature! Please enable them!", "PS3BluMote: No admin rights found!", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
-                        }
+                        }*/
 
                         foreach (XmlNode buttonNode in rssNode.SelectNodes("mappings/button"))
                         {
@@ -301,7 +410,7 @@ namespace PS3BluMote
                 return;
             }
 
-            if (DebugLog.isLogging) DebugLog.write("Keys up: { " + String.Join(",", keyboard.lastKeysDown.ToArray()) + " }");
+            if (DebugLog.isLogging && this.keyboard.lastKeysDown!=null) DebugLog.write("Keys up: { " + String.Join(",", keyboard.lastKeysDown.ToArray()) + " }");
 
             keyboard.releaseLastKeys();
         }
@@ -322,6 +431,16 @@ namespace PS3BluMote
             notifyIcon.Icon = Properties.Resources.Icon_Disconnected;
         }
 
+        private void remote_Hibernated(object sender, EventArgs e)
+        {
+            if (DebugLog.isLogging) DebugLog.write("Remote Hibernated");
+
+            notifyIcon.Text = "PS3BluMote: Hibernated + (Battery: " + remote.getBatteryLife.ToString() + "%).";
+            notifyIcon.Icon = Properties.Resources.Icon_Hibernated;
+        }
+
+
+
         private bool saveSettings()
         {
             string text = "<PS3BluMote version=\"" + SETTINGS_VERSION + "\">\r\n";
@@ -329,8 +448,16 @@ namespace PS3BluMote
             text += "\t\t<vendorid>" + txtVendorId.Text.ToLower() + "</vendorid>\r\n";
             text += "\t\t<productid>" + txtProductId.Text.ToLower() + "</productid>\r\n";
             text += "\t\t<smsinput>" + cbSms.Checked.ToString().ToLower() + "</smsinput>\r\n";
-            text += "\t\t<hibernation>" + cbHibernation.Checked.ToString().ToLower() + "</hibernation>\r\n";
+            text += "\t\t<hibernation>" + (cbHibernation.Checked && cbHibernation.Enabled).ToString().ToLower() + "</hibernation>\r\n";
+            text += "\t\t<btaddress>" + txtBtAddr.Text.ToLower() + "</btaddress>\r\n";
+            text += "\t\t<minutes>" + txtMinutes.Text.ToLower() + "</minutes>\r\n";
             text += "\t\t<repeatinterval>" + txtRepeatInterval.Text + "</repeatinterval>\r\n";
+            text += "\t\t<debug>" + cbDebugMode.Checked.ToString().ToLower() + "</debug>\r\n";
+            if (insertSound.Length > 0 && removeSound.Length > 0)
+            {
+                text += "\t\t<isound>" + insertSound + "</isound>\r\n";
+                text += "\t\t<rsound>" + removeSound + "</rsound>\r\n";
+            }
             text += "\t</settings>\r\n";
             text += "\t<mappings>\r\n";
 
@@ -433,6 +560,33 @@ namespace PS3BluMote
                 keysMapped = new List<SendInputAPI.Keyboard.KeyCode>();
                 repeat = false;
             }
+        }
+
+        private void buttonDump_Click(object sender, EventArgs e)
+        {
+            DebugLog.outputToFile(SETTINGS_DIRECTORY + "log.txt");
+        }
+
+        private void txtBtAddr_TextChanged(object sender, EventArgs e)
+        {
+            if (txtBtAddr.Text.Length == 17 || txtBtAddr.Text.Length == 12)
+            {
+                cbHibernation.Enabled = true;
+            }
+            else
+            {
+                cbHibernation.Enabled = false;
+            }
+        }
+
+        private void txtMinutes_TextChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                int i = System.Convert.ToInt32(txtMinutes.Text) * 60 * 1000;
+                if (remote != null) remote.hibernationInterval = i;
+            }
+            catch { }
         }
     }
 }

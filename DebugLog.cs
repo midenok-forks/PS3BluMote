@@ -42,7 +42,7 @@ namespace PS3BluMote
 
             try
             {
-                file = new StreamWriter(filename, false, Encoding.UTF8);
+                file = new StreamWriter(filename, true, Encoding.UTF8);
 
                 foreach (string line in _log)
                 {
@@ -54,6 +54,7 @@ namespace PS3BluMote
             finally
             {
                 if (file != null) file.Close();
+                _log.Clear();
             }
         }
     }
