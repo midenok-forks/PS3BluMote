@@ -165,7 +165,7 @@ namespace PS3BluMote
             set
             {
                 _hibernationEnabled = value;
-                timerHibernation.Enabled = _hibernationEnabled && !_hibernated;
+                timerHibernation.Enabled = _hibernationEnabled && !isHibernated();
             }
         }
         public int hibernationInterval
