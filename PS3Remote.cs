@@ -202,6 +202,7 @@ namespace PS3BluMote
                     Awake(this, new EventArgs());
                     _hibernated = false;
                 }
+                timerFindRemote.Interval = 1500;
                 
                 if (DebugLog.isLogging) DebugLog.write("Read button data: " + String.Join(",", InData.Data));
                 //Debug.Print("Read button data: " + String.Join(",", InData.Data));
@@ -320,6 +321,7 @@ namespace PS3BluMote
                     device.SetServiceState(BluetoothService.HumanInterfaceDevice, true);
 
                     _hibernated = true;
+                    timerFindRemote.Interval = 200;
 
                     if (DebugLog.isLogging) DebugLog.write("Hibernating Done.");
 
