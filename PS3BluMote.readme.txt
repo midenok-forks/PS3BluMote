@@ -1,0 +1,16 @@
+PS3BluMote Release Notes
+
+PS3BluMote has been partially coded by miljbee with the great help of the InTheHand.Net libraries.
+Please read the InTheHand.Net.Licence.txt file.
+
+The original PS3BluMote App was initially coded by BenBarron http://benbarron.com/applications
+I have added the hibernation Code.
+The method used is the same as the one used by PS3RemoteSleep from riaanc http://ps3remotesleep.codeplex.com/
+
+Concerning my code, do what you want with it, but please, be kind enough to mention me, or to send me your work or improvements.
+The source code is available on GitHub : https://github.com/miljbee/PS3BluMote
+
+The usual warnings applies, do what you want with that, but don't expect any support from me, even if it blows your hardware.
+If you feel generous, my paypal account is miljbee@gmail.com
+
+miljbee@gmail.com

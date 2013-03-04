@@ -74,7 +74,7 @@ namespace PS3BluMote
             this.llblOpenFolder = new System.Windows.Forms.LinkLabel();
             this.cbDebugMode = new System.Windows.Forms.CheckBox();
             this.gbAdvanced = new System.Windows.Forms.GroupBox();
-            this.txtBtAddr = new System.Windows.Forms.TextBox();
+            this.comboBtAddr = new System.Windows.Forms.ComboBox();
             this.lblBtAddr = new System.Windows.Forms.Label();
             this.lblRemoteCodes = new System.Windows.Forms.Label();
             this.txtVendorId = new System.Windows.Forms.TextBox();
@@ -334,7 +334,7 @@ namespace PS3BluMote
             // 
             // gbAdvanced
             // 
-            this.gbAdvanced.Controls.Add(this.txtBtAddr);
+            this.gbAdvanced.Controls.Add(this.comboBtAddr);
             this.gbAdvanced.Controls.Add(this.lblBtAddr);
             this.gbAdvanced.Controls.Add(this.lblRemoteCodes);
             this.gbAdvanced.Controls.Add(this.txtVendorId);
@@ -350,13 +350,18 @@ namespace PS3BluMote
             this.gbAdvanced.Text = "Advanced";
             this.toolTipAdvanced.SetToolTip(this.gbAdvanced, "For when using a remote OTHER THAN the official Sony PS3 Remote.");
             // 
-            // txtBtAddr
+            // comboBtAddr
             // 
-            this.txtBtAddr.Location = new System.Drawing.Point(99, 79);
-            this.txtBtAddr.Name = "txtBtAddr";
-            this.txtBtAddr.Size = new System.Drawing.Size(119, 20);
-            this.txtBtAddr.TabIndex = 5;
-            this.txtBtAddr.TextChanged += new System.EventHandler(this.txtBtAddr_TextChanged);
+            this.comboBtAddr.FormattingEnabled = true;
+            this.comboBtAddr.Items.AddRange(new object[] {
+            "Searching ..."});
+            this.comboBtAddr.Location = new System.Drawing.Point(97, 79);
+            this.comboBtAddr.Name = "comboBtAddr";
+            this.comboBtAddr.Size = new System.Drawing.Size(121, 21);
+            this.comboBtAddr.TabIndex = 13;
+            this.comboBtAddr.Text = "Searching ...";
+            this.comboBtAddr.SelectedIndexChanged += new System.EventHandler(this.comboBtAddr_SelectedIndexChanged);
+            this.comboBtAddr.TextChanged += new System.EventHandler(this.comboBtAddr_TextChanged);
             // 
             // lblBtAddr
             // 
@@ -496,7 +501,7 @@ namespace PS3BluMote
         private System.Windows.Forms.TextBox txtMinutes;
         private System.Windows.Forms.Button buttonDump;
         private System.Windows.Forms.Label label2;
-        private System.Windows.Forms.TextBox txtBtAddr;
         private System.Windows.Forms.Label lblBtAddr;
+        private System.Windows.Forms.ComboBox comboBtAddr;
     }
 }

@@ -32,7 +32,7 @@ using System.Resources;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Ben Barron")]
 [assembly: AssemblyProduct("PS3BluMote")]
-[assembly: AssemblyCopyright("Copyright © Ben Barron 2012")]
+[assembly: AssemblyCopyright("Copyright © Ben Barron 2012, Miljbee 2013")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

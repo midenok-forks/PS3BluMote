@@ -23,7 +23,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 using System;
 using System.Collections.Generic;
 using System.Timers;
-//using System.Diagnostics;
 
 using HidLibrary;
 using WindowsAPI;
@@ -47,6 +46,8 @@ namespace PS3BluMote
         private HidDevice hidRemote = null;
         private Timer timerFindRemote = null;
         private Timer timerHibernation = null;
+        private Timer timerGetSleepState = null;
+        private Timer timerSleepButton = null;
         private int vendorId = 0x054c;
         private int productId = 0x0306;
         private Button lastButton = Button.Angle;
@@ -54,12 +55,13 @@ namespace PS3BluMote
         private bool _hibernationEnabled;
         private int _hibernationInterval=180000;
         private string _btAddress;
-        private bool _hibernated;
+        private RemoteBtStates _sleepState = RemoteBtStates.Unknown;
 
         private string insertSound;
         private string removeSound;
+        
 
-        private byte _batteryLife = 100;
+        private byte _batteryLife = 101;
 
         #region "Remote button codes"
         static byte[][] buttonCodes = 
@@ -128,9 +130,9 @@ namespace PS3BluMote
             vendorId = vendor;
             productId = product;
             _hibernationEnabled = false;
+            _hibernationInterval = 180000;
             _btAddress = "";
-            _hibernated = false;
-            
+            _sleepState = RemoteBtStates.Unknown;
 
             timerHibernation = new Timer();
             timerHibernation.Interval = _hibernationInterval;
@@ -139,6 +141,16 @@ namespace PS3BluMote
             timerFindRemote = new Timer();
             timerFindRemote.Interval = 500;
             timerFindRemote.Elapsed += new ElapsedEventHandler(timerFindRemote_Elapsed);
+
+            timerGetSleepState = new Timer();
+            timerGetSleepState.Interval = 1000;
+            timerGetSleepState.AutoReset = false;
+            timerGetSleepState.Elapsed += new ElapsedEventHandler(timerGetSleepState_Elapsed);
+
+            timerSleepButton = new Timer();
+            timerSleepButton.Interval = 6000;
+            timerSleepButton.AutoReset = false;
+            timerSleepButton.Elapsed += new ElapsedEventHandler(timerSleepButton_Elapsed);
 
             insertSound = "";
             removeSound = "";
@@ -153,19 +165,40 @@ namespace PS3BluMote
         {
             get { return _batteryLife; }
         }
+        public string getBatteryLifeString()
+        {
+            if (_batteryLife > 100) return "Unknown";
+            else return getBatteryLife.ToString() + "%";
+        }
 
         public bool isConnected
         {
             get { return timerFindRemote.Enabled; }
         }
-
         public bool hibernationEnabled
         {
-            get { return _hibernationEnabled; }
+            get { return _hibernationEnabled && btAddress.Length==12; }
             set
             {
                 _hibernationEnabled = value;
-                timerHibernation.Enabled = _hibernationEnabled && !isHibernated();
+                if (value && btAddress.Length == 12)
+                {
+                    if (SleepState == RemoteBtStates.Awake)
+                    {
+                        DebugLog.write("Starting timerHibernation");
+                        timerHibernation.Start();
+                    }
+                    else if (SleepState == RemoteBtStates.Unknown)
+                    {
+                        DebugLog.write("Starting timerGetSleepState");
+                        timerGetSleepState.Start();
+                    }
+                }
+                else
+                {
+                    DebugLog.write("Stopping timerHibernation");
+                    timerHibernation.Stop();
+                }
             }
         }
         public int hibernationInterval
@@ -176,18 +209,56 @@ namespace PS3BluMote
                 timerHibernation.Interval = _hibernationInterval;
                 if (timerHibernation.Enabled)
                 {
+                    DebugLog.write("Restarting timerHibernation");
                     timerHibernation.Stop();
                     timerHibernation.Start();
                 }
             }
         }
-
         public string btAddress
         {
             get { return _btAddress; }
-            set { 
-                _btAddress = value;
-                _hibernated = isHibernated();
+            set {
+                string s = BTUtils.FormatBtAddress(value, null, "N");
+                if (s != _btAddress && s.Length==12)
+                {
+                    _btAddress = s;
+                    SleepState = RemoteBtStates.Unknown;
+                }
+            }
+        }
+        public RemoteBtStates SleepState
+        {
+            get
+            {
+                return _sleepState;
+            }
+            set
+            {
+                RemoteBtStates oldVal = _sleepState;
+                if (oldVal != value)
+                {
+                    _sleepState = value;
+                    if (_sleepState == RemoteBtStates.Awake && Awake != null) Awake(this, new EventArgs());
+                    if (_sleepState == RemoteBtStates.Hibernated && Hibernated != null) Hibernated(this, new EventArgs());
+
+                    if (_sleepState == RemoteBtStates.Awake && hibernationEnabled)
+                    {
+                        DebugLog.write("Starting timerHibernation");
+                        timerHibernation.Start();
+                    }
+                    else
+                    {
+                        DebugLog.write("Stopping timerHibernation");
+                        timerHibernation.Stop();
+                    }
+                    if (_sleepState == RemoteBtStates.Unknown && hibernationEnabled)
+                    {
+                        DebugLog.write("Starting timerGetSleepState");
+                        timerGetSleepState.Start();
+                    }
+                }
+
             }
         }
 
@@ -197,19 +268,16 @@ namespace PS3BluMote
 
             if ((InData.Status == HidDeviceData.ReadStatus.Success) && (InData.Data[0] == 1))
             {
-                if (_hibernated && Awake != null)
-                {
-                    Awake(this, new EventArgs());
-                    _hibernated = false;
-                }
+                SleepState = RemoteBtStates.Awake;
                 timerFindRemote.Interval = 1500;
                 
-                if (DebugLog.isLogging) DebugLog.write("Read button data: " + String.Join(",", InData.Data));
-                //Debug.Print("Read button data: " + String.Join(",", InData.Data));
+                DebugLog.write("Read button data: " + String.Join(",", InData.Data));
 
                 if ((InData.Data[10] == 0) || (InData.Data[4] == 255)) // button released
                 {
+                    timerSleepButton.Stop();
                     if (ButtonReleased != null && isButtonDown) ButtonReleased(this, new ButtonData(lastButton));
+
                 }
                 else // button pressed
                 {
@@ -233,6 +301,8 @@ namespace PS3BluMote
                         isButtonDown = true;
 
                         if (ButtonDown != null) ButtonDown(this, new ButtonData(lastButton));
+                        if (lastButton == Button.Playstation) timerSleepButton.Start();
+                        else timerSleepButton.Stop();
                     }                   
                 }
 
@@ -245,14 +315,14 @@ namespace PS3BluMote
                     if (BatteryLifeChanged != null) BatteryLifeChanged(this, new EventArgs());
                 }
                 
-                if (_hibernationEnabled) timerHibernation.Enabled = true;
+                if (_hibernationEnabled) timerHibernation.Start();
 
                 hidRemote.Read(readButtonData); //Read next button pressed.
 
                 return;
             }
 
-            if (DebugLog.isLogging) DebugLog.write("Read remote data: " + String.Join(",", InData.Data));
+            DebugLog.write("Read remote data: " + String.Join(",", InData.Data));
 
             if (Disconnected != null) Disconnected(this, new EventArgs());
 
@@ -269,7 +339,7 @@ namespace PS3BluMote
             timerFindRemote.Stop();
             if (hidRemote == null)
             {
-                if (DebugLog.isLogging) DebugLog.write("Searching for remote");
+                DebugLog.write("Searching for remote");
 
                 IEnumerator<HidDevice> devices = HidDevices.Enumerate(vendorId, productId).GetEnumerator();
                 
@@ -277,97 +347,88 @@ namespace PS3BluMote
 
                 if (hidRemote != null)
                 {
-                    if (DebugLog.isLogging) DebugLog.write("Remote found");
+                    DebugLog.write("Remote found");
 
                     hidRemote.OpenDevice();
 
-                    if (Connected != null) Connected(this, new EventArgs());
-                    if (_hibernated && Hibernated != null) Hibernated(this, new EventArgs());
+                    if (SleepState == RemoteBtStates.Hibernated)
+                    {
+                        if (Hibernated != null) Hibernated(this, new EventArgs());
+                    }
+                    else if (Connected != null) Connected(this, new EventArgs());
 
-                    if (!_hibernated && hibernationEnabled) timerHibernation.Enabled = true;
-                    if (_hibernated && hibernationEnabled) RestoreDevicesInsertionSounds();
+                    if (SleepState == RemoteBtStates.Awake && hibernationEnabled) timerHibernation.Start();
+                    if (SleepState == RemoteBtStates.Hibernated && hibernationEnabled) RestoreDevicesInsertionSounds();
 
                     hidRemote.Read(readButtonData);
+
                 }
             }
 
             if (hidRemote == null) timerFindRemote.Start();
         }
-
         private void timerHibernation_Elapsed(object sender, ElapsedEventArgs e)
         {
             timerHibernation.Stop();
-            if (DebugLog.isLogging) DebugLog.write("Attempting to hibernate remote");
+            DebugLog.write("Attempting to hibernate remote");
 
-            if (_btAddress.Length == 12)
+            if (_btAddress.Length>0)
             {
                 try
                 {
                     if (SaveDevicesInsertionSounds())
                     {
-                        if (DebugLog.isLogging) DebugLog.write("Disabling device connect/disconnect sounds:");
-                        Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", "");
-                        Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", "");
+                        DebugLog.write("Disabling device connect/disconnect sounds");
+                        RegUtils.SetDevConnectedSound("");
+                        RegUtils.SetDevDisconnectedSound("");
                         // Values are restored in ReadButton Data, because, it seems that this method might end before the device is actually Reconnected
                     }
 
-                    if (DebugLog.isLogging) DebugLog.write("Hibernating the remote with address " + _btAddress + ":");
-                    BluetoothDeviceInfo device = new BluetoothDeviceInfo(BluetoothAddress.Parse(_btAddress));
+                    BTUtils.HibernatePS3Remote(false, _btAddress, null);
+                    SleepState = RemoteBtStates.Hibernated;
+                    timerFindRemote.Interval = 300;
 
-                    if (DebugLog.isLogging) DebugLog.write("Disconnecting HID Service from the Remote...");
-                    device.SetServiceState(BluetoothService.HumanInterfaceDevice, false);
-
-                    if (DebugLog.isLogging) DebugLog.write("ReConnecting HID Service to the Remote...");
-                    device.SetServiceState(BluetoothService.HumanInterfaceDevice, true);
-
-                    _hibernated = true;
-                    timerFindRemote.Interval = 200;
-
-                    if (DebugLog.isLogging) DebugLog.write("Hibernating Done.");
+                    DebugLog.write("Hibernating Done");
 
                 }
                 catch (Exception ex)
                 {
-                    if (DebugLog.isLogging) DebugLog.write("Unable to hibernate remote:" + ex.Message);
+                    DebugLog.write("Unable to hibernate remote" + ex.Message);
                 }
 
             }
-            else
-            {
-                if (DebugLog.isLogging) DebugLog.write("Wrong format for BT Address");
-            }
+            else DebugLog.write("Wrong format for BT Address");
         }
-
-        public bool isHibernated()
+        private void timerGetSleepState_Elapsed(object sender, ElapsedEventArgs e)
         {
-            if (_btAddress.Length == 12 || _btAddress.Length == 17)
+            timerGetSleepState.Stop();
+            if (SleepState == RemoteBtStates.Unknown && hibernationEnabled)
             {
-                BluetoothDeviceInfo device;
-                try { device = new BluetoothDeviceInfo(BluetoothAddress.Parse(_btAddress)); }
-                catch { return false; } // The remote is considered awake
-
-                try { ServiceRecord[] services = device.GetServiceRecords(InTheHand.Net.Bluetooth.BluetoothService.HumanInterfaceDevice); }
-                catch {
-                    if (!_hibernated && Hibernated != null) Hibernated(this, new EventArgs());
-                    return true; 
-                }
-                return false;
+                //it might take some time
+                DebugLog.write("Reading sleepState from BT");
+                SleepState = BTUtils.RemoteBtState(btAddress, null);
             }
-            else return false; // The remote is considered awake
+
+        }
+        private void timerSleepButton_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            DebugLog.write("The remote has been hibernated manually");
+            timerSleepButton.Stop();
+            SleepState = RemoteBtStates.Hibernated;
         }
 
         private bool SaveDevicesInsertionSounds()
         {
             try
             {
-                if (DebugLog.isLogging) DebugLog.write("Saving device connect/disconnect sounds:");
-                insertSound = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", "");
-                removeSound = (string)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", "");
+                DebugLog.write("Saving device connect/disconnect sounds");
+                insertSound = RegUtils.GetDevConnectedSound();
+                removeSound = RegUtils.GetDevDisconnectedSound();
                 return true;
             }
             catch
             {
-                if (DebugLog.isLogging) DebugLog.write("Unable to save device connect/disconnect sounds.");
+                if (DebugLog.isLogging) DebugLog.write("Unable to save device connect/disconnect sounds");
                 return false;
             }
         }
@@ -375,13 +436,13 @@ namespace PS3BluMote
         {
             try
             {
-                if (DebugLog.isLogging) DebugLog.write("Restoring device connect/disconnect sounds:");
-                if (insertSound.Length > 0) Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceConnect\.Current", "", insertSound);
-                if (removeSound.Length > 0) Microsoft.Win32.Registry.SetValue(@"HKEY_CURRENT_USER\AppEvents\Schemes\Apps\.Default\DeviceDisconnect\.Current", "", removeSound);
+                DebugLog.write("Restoring device connect/disconnect sounds");
+                if (insertSound.Length > 0) RegUtils.SetDevConnectedSound(insertSound);
+                if (removeSound.Length > 0) RegUtils.SetDevDisconnectedSound(removeSound);
             }
             catch
             {
-                if (DebugLog.isLogging) DebugLog.write("Unable to restore device connect/disconnect sounds.");
+                DebugLog.write("Unable to restore device connect/disconnect sounds");
             }
         }
 
@@ -394,7 +455,6 @@ namespace PS3BluMote
                 button = btn;
             }
         }
-
         public enum Button
         {
             Eject,
