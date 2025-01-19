@@ -58,9 +58,7 @@
   <PropertyGroup>
     <ApplicationIcon>Resources\icon.ico</ApplicationIcon>
   </PropertyGroup>
-  <PropertyGroup>
-    <NoWin32Manifest>true</NoWin32Manifest>
-  </PropertyGroup>
+  <PropertyGroup />
   <PropertyGroup>
     <StartupObject>PS3BluMote.Program</StartupObject>
   </PropertyGroup>
@@ -81,6 +79,9 @@
     <ErrorReport>prompt</ErrorReport>
     <CodeAnalysisIgnoreBuiltInRuleSets>false</CodeAnalysisIgnoreBuiltInRuleSets>
     <CodeAnalysisIgnoreBuiltInRules>false</CodeAnalysisIgnoreBuiltInRules>
+  </PropertyGroup>
+  <PropertyGroup>
+    <NoWin32Manifest>true</NoWin32Manifest>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -149,6 +150,7 @@
   <ItemGroup>
     <None Include="Resources\Icon Disconnected.ico" />
     <None Include="Resources\Icon Connected.ico" />
+    <EmbeddedResource Include="Resources\settings.ini" />
   </ItemGroup>
   <ItemGroup>
     <PublishFile Include="PS3BluMote.exe.config">

@@ -22,6 +22,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Security.Principal;
 using System.Windows.Forms;
 using System.Xml;
@@ -33,13 +34,15 @@ namespace PS3BluMote
     public partial class SettingsForm : Form
     {
         private readonly String SETTINGS_DIRECTORY = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData) + "\\PS3BluMote\\";
-        private readonly String SETTINGS_FILE = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData) + "\\PS3BluMote\\settings.ini";
+        private static String SETTINGS_NAME = "settings.ini";
+        private readonly String SETTINGS_FILE = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData) + "\\PS3BluMote\\" + SETTINGS_NAME;
         private const String SETTINGS_VERSION = "2.0";
 
         private ButtonMapping[] buttonMappings = new ButtonMapping[56];
         private PS3Remote remote = null;
         private SendInputAPI.Keyboard keyboard = null;
         private System.Timers.Timer timerRepeat = null;
+        FileSystemWatcher watcher = new FileSystemWatcher();
 
         public SettingsForm()
         {
@@ -116,74 +119,102 @@ namespace PS3BluMote
 
         private bool loadSettings()
         {
-            String errorMessage;
+            String errorMessage = "";
 
-            if (File.Exists(SETTINGS_FILE))
+        extract_settings:
+            if (errorMessage != "" || !File.Exists(SETTINGS_FILE))
             {
-                XmlDocument rssDoc = new XmlDocument();
+                ExtractResource(SETTINGS_NAME, SETTINGS_DIRECTORY);
+                if (errorMessage != "")
+                    MessageBox.Show(errorMessage + " A fresh settings file has been created.", "PS3BluMote: Settings load error!", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
 
-                try
+            XmlDocument rssDoc = new XmlDocument();
+
+            try
+            {
+                rssDoc.Load(SETTINGS_FILE);
+
+                XmlNode rssNode = rssDoc.SelectSingleNode("PS3BluMote");
+
+                if (rssNode.Attributes["version"].InnerText == SETTINGS_VERSION)
                 {
-                    rssDoc.Load(SETTINGS_FILE);
+                    cbSms.Checked = (rssNode.SelectSingleNode("settings/smsinput").InnerText.ToLower() == "true") ? true : false;
+                    cbHibernation.Checked = (rssNode.SelectSingleNode("settings/hibernation").InnerText.ToLower() == "true") ? true : false;
+                    txtVendorId.Text = rssNode.SelectSingleNode("settings/vendorid").InnerText;
+                    txtProductId.Text = rssNode.SelectSingleNode("settings/productid").InnerText;
 
-                    XmlNode rssNode = rssDoc.SelectSingleNode("PS3BluMote");
-
-                    if (rssNode.Attributes["version"].InnerText == SETTINGS_VERSION)
+                    try
                     {
-                        cbSms.Checked = (rssNode.SelectSingleNode("settings/smsinput").InnerText.ToLower() == "true") ? true : false;
-                        cbHibernation.Checked = (rssNode.SelectSingleNode("settings/hibernation").InnerText.ToLower() == "true") ? true : false;
-                        txtVendorId.Text = rssNode.SelectSingleNode("settings/vendorid").InnerText;
-                        txtProductId.Text = rssNode.SelectSingleNode("settings/productid").InnerText;
-
-                        try
-                        {
-                            txtRepeatInterval.Text = rssNode.SelectSingleNode("settings/repeatinterval").InnerText;
-                        }
-                        catch
-                        { }
+                        txtRepeatInterval.Text = rssNode.SelectSingleNode("settings/repeatinterval").InnerText;
+                    }
+                    catch
+                    { }
                         
-                        if (cbHibernation.Checked &&
-                            !(new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)))
-                        {
-                            MessageBox.Show("Admin/UAC elevated rights are required to use the hibernation feature! Please enable them!", "PS3BluMote: No admin rights found!", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
-                        }
-
-                        foreach (XmlNode buttonNode in rssNode.SelectNodes("mappings/button"))
-                        {
-                            int index = (int)Enum.Parse(typeof(PS3Remote.Button), buttonNode.Attributes["name"].InnerText, true);
-                            buttonMappings[index].repeat = (buttonNode.Attributes["repeat"].InnerText.ToLower() == "true") ? true : false;
-                            lvButtons.Items[index].Checked = buttonMappings[index].repeat;
-                            List<SendInputAPI.Keyboard.KeyCode> mappedKeys = buttonMappings[index].keysMapped;
-
-                            if (buttonNode.InnerText.Length > 0)
-                            {
-                                foreach (string keyCode in buttonNode.InnerText.Split(','))
-                                {
-                                    mappedKeys.Add((SendInputAPI.Keyboard.KeyCode)Enum.Parse(typeof(SendInputAPI.Keyboard.KeyCode), keyCode, true));
-                                }
-
-                                lvButtons.Items[index].SubItems[2].Text = buttonNode.InnerText.Replace(",", " + ");
-                            }
-                        }
-
-                        return true;
+                    if (cbHibernation.Checked &&
+                        !(new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)))
+                    {
+                        MessageBox.Show("Admin/UAC elevated rights are required to use the hibernation feature! Please enable them!", "PS3BluMote: No admin rights found!", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
                     }
 
-                    errorMessage = "Incorrect settings file version.";
+                    foreach (XmlNode buttonNode in rssNode.SelectNodes("mappings/button"))
+                    {
+                        int index = (int)Enum.Parse(typeof(PS3Remote.Button), buttonNode.Attributes["name"].InnerText, true);
+                        buttonMappings[index].repeat = (buttonNode.Attributes["repeat"].InnerText.ToLower() == "true") ? true : false;
+                        lvButtons.Items[index].Checked = buttonMappings[index].repeat;
+                        List<SendInputAPI.Keyboard.KeyCode> mappedKeys = buttonMappings[index].keysMapped;
+
+                        if (buttonNode.InnerText.Length > 0)
+                        {
+                            foreach (string keyCode in buttonNode.InnerText.Split(','))
+                            {
+                                mappedKeys.Add((SendInputAPI.Keyboard.KeyCode)Enum.Parse(typeof(SendInputAPI.Keyboard.KeyCode), keyCode, true));
+                            }
+
+                            lvButtons.Items[index].SubItems[2].Text = buttonNode.InnerText.Replace(",", " + ");
+                        }
+                    }
+
+                    return true;
                 }
-                catch
-                {
-                    errorMessage = "An error occured whilst attempting to load settings.";
-                }
+
+                if (errorMessage != "")
+                    return false;
+
+                errorMessage = "Incorrect settings file version.";
             }
-            else
+            catch
             {
-                errorMessage = "Unable to locate the settings file.";
+                if (errorMessage != "")
+                    return false;
+                errorMessage = "An error occured whilst attempting to load settings.";
             }
 
-            MessageBox.Show(errorMessage + " A fresh settings file has been created.", "PS3BluMote: Settings load error!", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            
-            return false;
+            goto extract_settings;
+        }
+
+        private static void ExtractResource(string resourceName, string targetDirectory)
+        {
+            Assembly assembly = Assembly.GetExecutingAssembly();
+            //string[] names = assembly.GetManifestResourceNames();
+            string resourcePath = "PS3BluMote.Resources." + resourceName;
+
+            using (Stream stream = assembly.GetManifestResourceStream(resourcePath))
+            {
+                if (stream == null)
+                {
+                    MessageBox.Show($"Resource '{resourcePath}' not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Environment.Exit(1);
+                }
+
+                string outputPath = Path.Combine(targetDirectory, resourceName);
+                using (FileStream fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
+                {
+                    stream.CopyTo(fileStream);
+                }
+
+                Console.WriteLine($"Resource '{resourceName}' has been extracted to '{outputPath}'.");
+            }
         }
 
         private void lvButtons_ItemChecked(object sender, ItemCheckedEventArgs e)
