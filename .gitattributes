@@ -1,0 +1,12 @@
+# Set the default behavior for all text files
+* text eol=crlf
+
+*.dll binary
+*.exe binary
+
+
+# Ensure specific file types have CRLF line endings
+# *.txt text eol=crlf
+# *.bat text eol=crlf
+# *.cmd text eol=crlf
+# *.cs text eol=crlf  # For C# files, if applicable

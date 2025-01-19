@@ -6,6 +6,7 @@ using System.Text;
 using InTheHand.Net;
 using InTheHand.Net.Bluetooth;
 using InTheHand.Net.Sockets;
+using InTheHand.Net.Bluetooth.Sdp;
 
 namespace PS3BluMote
 {
@@ -18,7 +19,7 @@ namespace PS3BluMote
             {
                 BluetoothClient cli = new BluetoothClient();
                 if (timeout != TimeSpan.Zero) cli.InquiryLength = timeout;
-                BluetoothDeviceInfo[] devs = cli.DiscoverDevices();
+                BluetoothDeviceInfo[] devs = cli.DiscoverDevices().ToArray();
                 foreach (BluetoothDeviceInfo dev in devs)
                 {
                     if (dev.DeviceName.ToLower().Contains("bd remote control"))
@@ -56,7 +57,7 @@ namespace PS3BluMote
             {
                 try
                 {
-                    ServiceRecord[] services = device.GetServiceRecords(BluetoothService.HumanInterfaceDevice);
+                    var services = device.GetRfcommServicesAsync(false);
                     result = RemoteBtStates.Awake;
                 }
                 catch
